@@ -1501,7 +1501,7 @@ def index() -> rx.Component:
 # Configuración de la app
 app = rx.App(
     theme=rx.theme(
-        appearance="dark",
+        appearance="inherit",
         accent_color="blue",
         gray_color="slate",
     )
