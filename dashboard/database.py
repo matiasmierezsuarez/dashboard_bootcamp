@@ -1,6 +1,6 @@
 """
 Módulo de acceso a datos y análisis estadístico
-VERSIÓN MEJORADA: Incluye queries para gráficos dinámicos con Plotly
+VERSIÓN MEJORADA: Soporte completo para filtros globales (estado, categoría, fechas)
 """
 
 import pandas as pd
@@ -27,10 +27,48 @@ class DatabaseManager:
         with self.engine.connect() as conn:
             return pd.read_sql(text(query), conn, params=params)
     
-    # ==================== QUERIES ORIGINALES (sin cambios) ====================
+    def _build_filter_conditions(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None,
+        base_alias: str = "f"
+    ) -> str:
+        """
+        Construye condiciones WHERE comunes para filtros globales
+        
+        Args:
+            start_date: Fecha inicio
+            end_date: Fecha fin
+            state_filter: Estado del cliente
+            category_filter: Categoría de producto
+            base_alias: Alias de la tabla fact_sales
+        """
+        conditions = []
+        
+        if start_date:
+            conditions.append(f"cal.date_ymd >= '{start_date}'")
+        if end_date:
+            conditions.append(f"cal.date_ymd <= '{end_date}'")
+        if state_filter:
+            conditions.append(f"c.customer_state = '{state_filter}'")
+        if category_filter:
+            conditions.append(f"p.product_category_name = '{category_filter}'")
+        
+        return " AND " + " AND ".join(conditions) if conditions else ""
     
-    def get_top_states_by_sales(self, start_date: str = None, end_date: str = None, limit: int = 10) -> pd.DataFrame:
-        """Estados con más ventas"""
+    # ==================== QUERIES CON FILTROS GLOBALES ====================
+    
+    def get_top_states_by_sales(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Estados con más ventas - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             c.customer_state as estado,
@@ -39,25 +77,25 @@ class DatabaseManager:
             AVG(f.total) as promedio_venta
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY c.customer_state
         ORDER BY ventas_totales DESC
         LIMIT :limit
         """
-        
         return self.execute_query(query, {"limit": limit})
     
-    def get_bottom_states_by_sales(self, start_date: str = None, end_date: str = None, limit: int = 10) -> pd.DataFrame:
-        """Estados con menos ventas"""
+    def get_bottom_states_by_sales(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Estados con menos ventas - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             c.customer_state as estado,
@@ -66,25 +104,24 @@ class DatabaseManager:
             AVG(f.total) as promedio_venta
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY c.customer_state
         ORDER BY ventas_totales ASC
         LIMIT :limit
         """
-        
         return self.execute_query(query, {"limit": limit})
     
-    def get_top_product(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
-        """Producto más vendido"""
+    def get_top_product(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Producto más vendido - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             p.product_id,
@@ -94,25 +131,25 @@ class DatabaseManager:
             AVG(f.price) as precio_promedio
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY p.product_id, p.product_category_name
         ORDER BY unidades_vendidas DESC
         LIMIT 1
         """
-        
         return self.execute_query(query)
     
-    def get_top_categories(self, start_date: str = None, end_date: str = None, limit: int = 10) -> pd.DataFrame:
-        """Categorías más vendidas"""
+    def get_top_categories(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Categorías más vendidas - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             p.product_category_name as categoria,
@@ -121,25 +158,24 @@ class DatabaseManager:
             AVG(f.total) as promedio_venta
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE p.product_category_name IS NOT NULL
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY p.product_category_name
         ORDER BY ventas_totales DESC
         LIMIT :limit
         """
-        
         return self.execute_query(query, {"limit": limit})
     
-    def get_top_seller(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
-        """Vendedor con más ventas"""
+    def get_top_seller(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Vendedor con más ventas - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             s.seller_id,
@@ -150,25 +186,25 @@ class DatabaseManager:
             AVG(f.total) as promedio_venta
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_sellers s ON f.seller_key = s.seller_key
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY s.seller_id, s.seller_city, s.seller_state
         ORDER BY ventas_totales DESC
         LIMIT 1
         """
-        
         return self.execute_query(query)
     
-    def get_top_customer(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
-        """Cliente con más compras"""
+    def get_top_customer(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> pd.DataFrame:
+        """Cliente con más compras - CON FILTROS GLOBALES"""
         query = f"""
         SELECT 
             c.customer_id,
@@ -179,24 +215,48 @@ class DatabaseManager:
             AVG(f.total) as promedio_compra
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += """
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY c.customer_id, c.customer_city, c.customer_state
         ORDER BY total_comprado DESC
         LIMIT 1
         """
-        
         return self.execute_query(query)
     
-    # ==================== ESTADÍSTICAS ====================
+    def get_overview_metrics(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> Dict:
+        """Métricas generales del dashboard - CON FILTROS GLOBALES"""
+        query = f"""
+        SELECT 
+            COUNT(DISTINCT f.order_id) as total_ordenes,
+            SUM(f.total) as ventas_totales,
+            AVG(f.total) as ticket_promedio,
+            COUNT(DISTINCT f.customer_key) as clientes_unicos,
+            COUNT(DISTINCT f.seller_key) as vendedores_activos
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        WHERE 1=1
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
+        """
+        df = self.execute_query(query)
+        return df.iloc[0].to_dict() if not df.empty else {
+            'total_ordenes': 0,
+            'ventas_totales': 0,
+            'ticket_promedio': 0,
+            'clientes_unicos': 0,
+            'vendedores_activos': 0
+        }
+    
+    # ==================== ESTADÍSTICAS CON FILTROS GLOBALES ====================
     
     def get_statistics(
         self,
@@ -204,9 +264,11 @@ class DatabaseManager:
         group_by: str = None,
         filter_value: str = None,
         start_date: str = None,
-        end_date: str = None
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
     ) -> Dict:
-        """Calcula estadísticas descriptivas para una métrica específica"""
+        """Calcula estadísticas descriptivas - CON FILTROS GLOBALES"""
         query = f"""
         SELECT f.{metric} as valor
         FROM {SCHEMA}.fact_sales f
@@ -215,13 +277,10 @@ class DatabaseManager:
         JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         """
         
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
+        # Filtros adicionales específicos para estadísticas
         if group_by and filter_value:
             if group_by == "customer_state":
                 query += f" AND c.customer_state = '{filter_value}'"
@@ -275,77 +334,18 @@ class DatabaseManager:
             "count": int(len(values))
         }
     
-    # ==================== FILTROS ====================
-    
-    def get_available_states(self) -> List[str]:
-        """Obtiene lista de estados disponibles"""
-        query = f"SELECT DISTINCT customer_state FROM {SCHEMA}.dim_customers ORDER BY customer_state"
-        df = self.execute_query(query)
-        return df['customer_state'].tolist()
-    
-    def get_available_cities(self, state: str = None) -> List[str]:
-        """Obtiene lista de ciudades disponibles"""
-        query = f"SELECT DISTINCT customer_city FROM {SCHEMA}.dim_customers"
-        if state:
-            query += f" WHERE customer_state = '{state}'"
-        query += " ORDER BY customer_city"
-        df = self.execute_query(query)
-        return df['customer_city'].tolist()
-    
-    def get_available_categories(self) -> List[str]:
-        """Obtiene lista de categorías disponibles"""
-        query = f"SELECT DISTINCT product_category_name FROM {SCHEMA}.dim_products WHERE product_category_name IS NOT NULL ORDER BY product_category_name"
-        df = self.execute_query(query)
-        return df['product_category_name'].tolist()
-    
-    def get_date_range(self) -> Tuple[str, str]:
-        """Obtiene el rango de fechas disponible"""
-        query = f"""
-        SELECT 
-            MIN(cal.date_ymd) as min_date,
-            MAX(cal.date_ymd) as max_date
-        FROM {SCHEMA}.fact_sales f
-        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
-        """
-        df = self.execute_query(query)
-        return (str(df['min_date'].iloc[0]), str(df['max_date'].iloc[0]))
-    
-    def get_overview_metrics(self, start_date: str = None, end_date: str = None) -> Dict:
-        """Métricas generales del dashboard"""
-        query = f"""
-        SELECT 
-            COUNT(DISTINCT f.order_id) as total_ordenes,
-            SUM(f.total) as ventas_totales,
-            AVG(f.total) as ticket_promedio,
-            COUNT(DISTINCT f.customer_key) as clientes_unicos,
-            COUNT(DISTINCT f.seller_key) as vendedores_activos
-        FROM {SCHEMA}.fact_sales f
-        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
-        WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        df = self.execute_query(query)
-        return df.iloc[0].to_dict()
-    
-    # ==================== NUEVAS QUERIES PARA GRÁFICOS DINÁMICOS ====================
+    # ==================== QUERIES DINÁMICAS PLOTLY CON FILTROS GLOBALES ====================
     
     def get_sales_by_state_dynamic(
         self,
         start_date: str = None,
         end_date: str = None,
         metric: str = "total_sales",
-        limit: int = 10
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
     ) -> List[Dict]:
-        """
-        Query dinámica para ventas por estado con métrica seleccionable
-        Retorna lista de diccionarios para uso directo con Plotly
-        """
-        # Mapeo de métricas
+        """Query dinámica para ventas por estado - CON FILTROS GLOBALES"""
         metric_mapping = {
             "total_sales": "SUM(f.total)",
             "avg_sales": "AVG(f.total)",
@@ -364,23 +364,17 @@ class DatabaseManager:
             AVG(f.total) as avg_ticket
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += f"""
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY c.customer_state
         ORDER BY {metric_sql} DESC
         LIMIT :limit
         """
         
         df = self.execute_query(query, {"limit": limit})
-        return df.to_dict('records')
+        return df.to_dict('records') if not df.empty else []
     
     def get_sales_by_city_dynamic(
         self,
@@ -388,9 +382,10 @@ class DatabaseManager:
         end_date: str = None,
         metric: str = "total_sales",
         limit: int = 10,
-        state: str = None
+        state_filter: str = None,
+        category_filter: str = None
     ) -> List[Dict]:
-        """Query dinámica para ventas por ciudad"""
+        """Query dinámica para ventas por ciudad - CON FILTROS GLOBALES"""
         metric_mapping = {
             "total_sales": "SUM(f.total)",
             "avg_sales": "AVG(f.total)",
@@ -410,34 +405,28 @@ class DatabaseManager:
             AVG(f.total) as avg_ticket
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        if state:
-            query += f" AND c.customer_state = '{state}'"
-        
-        query += f"""
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY c.customer_city, c.customer_state
         ORDER BY {metric_sql} DESC
         LIMIT :limit
         """
         
         df = self.execute_query(query, {"limit": limit})
-        return df.to_dict('records')
+        return df.to_dict('records') if not df.empty else []
     
     def get_sales_by_category_dynamic(
         self,
         start_date: str = None,
         end_date: str = None,
         metric: str = "total_sales",
-        limit: int = 10
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
     ) -> List[Dict]:
-        """Query dinámica para ventas por categoría"""
+        """Query dinámica para ventas por categoría - CON FILTROS GLOBALES"""
         metric_mapping = {
             "total_sales": "SUM(f.total)",
             "avg_sales": "AVG(f.total)",
@@ -457,32 +446,28 @@ class DatabaseManager:
             COUNT(DISTINCT p.product_id) as total_products
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE p.product_category_name IS NOT NULL
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += f"""
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY p.product_category_name
         ORDER BY {metric_sql} DESC
         LIMIT :limit
         """
         
         df = self.execute_query(query, {"limit": limit})
-        return df.to_dict('records')
+        return df.to_dict('records') if not df.empty else []
     
     def get_sales_by_seller_dynamic(
         self,
         start_date: str = None,
         end_date: str = None,
         metric: str = "total_sales",
-        limit: int = 10
+        limit: int = 10,
+        state_filter: str = None,
+        category_filter: str = None
     ) -> List[Dict]:
-        """Query dinámica para ventas por vendedor"""
+        """Query dinámica para ventas por vendedor - CON FILTROS GLOBALES"""
         metric_mapping = {
             "total_sales": "SUM(f.total)",
             "avg_sales": "AVG(f.total)",
@@ -504,23 +489,55 @@ class DatabaseManager:
             COUNT(DISTINCT f.customer_key) as unique_customers
         FROM {SCHEMA}.fact_sales f
         JOIN {SCHEMA}.dim_sellers s ON f.seller_key = s.seller_key
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
         JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
         WHERE 1=1
-        """
-        
-        if start_date:
-            query += f" AND cal.date_ymd >= '{start_date}'"
-        if end_date:
-            query += f" AND cal.date_ymd <= '{end_date}'"
-        
-        query += f"""
+        {self._build_filter_conditions(start_date, end_date, state_filter, category_filter)}
         GROUP BY s.seller_id, s.seller_state, s.seller_city
         ORDER BY {metric_sql} DESC
         LIMIT :limit
         """
         
         df = self.execute_query(query, {"limit": limit})
-        return df.to_dict('records')
+        return df.to_dict('records') if not df.empty else []
+    
+    # ==================== FILTROS Y UTILIDADES ====================
+    
+    def get_available_states(self) -> List[str]:
+        """Obtiene lista de estados disponibles"""
+        query = f"SELECT DISTINCT customer_state FROM {SCHEMA}.dim_customers WHERE customer_state IS NOT NULL ORDER BY customer_state"
+        df = self.execute_query(query)
+        return df['customer_state'].tolist()
+    
+    def get_available_cities(self, state: str = None) -> List[str]:
+        """Obtiene lista de ciudades disponibles"""
+        query = f"SELECT DISTINCT customer_city FROM {SCHEMA}.dim_customers WHERE customer_city IS NOT NULL"
+        if state:
+            query += f" AND customer_state = '{state}'"
+        query += " ORDER BY customer_city"
+        df = self.execute_query(query)
+        return df['customer_city'].tolist()
+    
+    def get_available_categories(self) -> List[str]:
+        """Obtiene lista de categorías disponibles"""
+        query = f"SELECT DISTINCT product_category_name FROM {SCHEMA}.dim_products WHERE product_category_name IS NOT NULL ORDER BY product_category_name"
+        df = self.execute_query(query)
+        return df['product_category_name'].tolist()
+    
+    def get_date_range(self) -> Tuple[str, str]:
+        """Obtiene el rango de fechas disponible"""
+        query = f"""
+        SELECT 
+            MIN(cal.date_ymd) as min_date,
+            MAX(cal.date_ymd) as max_date
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        """
+        df = self.execute_query(query)
+        if df.empty:
+            return ("2016-01-01", "2018-12-31")  # Fallback
+        return (str(df['min_date'].iloc[0]), str(df['max_date'].iloc[0]))
 
 
 # Instancia global

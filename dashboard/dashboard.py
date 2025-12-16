@@ -1,5 +1,5 @@
 """
-Dashboard Analytics - Versión Mejorada con Gráficos Plotly Dinámicos
+Dashboard Analytics - Versión con Filtros Globales y Navegación
 """
 import reflex as rx
 from datetime import datetime, timedelta
@@ -12,46 +12,43 @@ import plotly.graph_objects as go
 class DashboardState(rx.State):
     """Estado principal del dashboard"""
     
-    # ==================== FILTROS DE FECHA ====================
+    # ==================== NAVEGACIÓN ====================
+    current_page: str = "overview"
+    
+    # ==================== FILTROS GLOBALES ====================
     start_date: str = ""
     end_date: str = ""
     min_available_date: str = ""
     max_available_date: str = ""
+    selected_state_filter: str = ""  # Filtro global por estado
+    selected_category_filter: str = ""  # Filtro global por categoría
     
-    # ==================== FILTROS ADICIONALES ====================
+    # ==================== FILTROS ADICIONALES PARA ESTADÍSTICAS ====================
     selected_metric: str = "total"
     selected_group: str = "customer_state"
     selected_filter_value: str = ""
     
-    # ==================== DATOS PARA GRÁFICOS RECHARTS (ORIGINALES) ====================
+    # ==================== DATOS PARA GRÁFICOS RECHARTS ====================
     top_states_chart: list[dict] = []
     bottom_states_chart: list[dict] = []
     categories_chart: list[dict] = []
     
-    # ==================== DATOS PARA GRÁFICOS PLOTLY (NUEVOS) ====================
+    # ==================== DATOS PARA GRÁFICOS PLOTLY ====================
     fig_states_plotly: go.Figure = go.Figure()
     fig_cities_plotly: go.Figure = go.Figure()
     fig_categories_plotly: go.Figure = go.Figure()
     fig_sellers_plotly: go.Figure = go.Figure()
     
     # ==================== CONTROLES PARA GRÁFICOS DINÁMICOS ====================
-    # Estados
     selected_metric_state: str = "total_sales"
     num_states_to_show: str = "10"
-    
-    # Ciudades
     selected_metric_city: str = "total_sales"
     num_cities_to_show: str = "10"
-    
-    # Categorías
     selected_metric_category: str = "total_sales"
     num_categories_to_show: str = "10"
-    
-    # Vendedores
     selected_metric_seller: str = "total_sales"
     num_sellers_to_show: str = "10"
     
-    # Opciones
     metric_options: list[str] = ["total_sales", "avg_sales", "total_orders", "avg_ticket"]
     limit_options: list[str] = ["5", "10", "15", "20", "25"]
     
@@ -60,8 +57,9 @@ class DashboardState(rx.State):
     loading_chart_cities: bool = False
     loading_chart_categories: bool = False
     loading_chart_sellers: bool = False
+    is_loading: bool = False
     
-    # ==================== DATOS PARA MÉTRICAS (ORIGINALES) ====================
+    # ==================== DATOS PARA MÉTRICAS ====================
     top_product_data: dict = {}
     top_seller_data: dict = {}
     top_customer_data: dict = {}
@@ -72,10 +70,15 @@ class DashboardState(rx.State):
     available_states: list[str] = []
     available_categories: list[str] = []
     
-    # ==================== ESTADO DE CARGA ====================
-    is_loading: bool = False
-    
     # ==================== COMPUTED VARS ====================
+    @rx.var
+    def states_filter_options(self) -> list[str]:
+        return ["Todos"] + self.available_states
+    
+    @rx.var
+    def categories_filter_options(self) -> list[str]:
+        return ["Todas"] + self.available_categories
+    
     @rx.var
     def states_options(self) -> list[str]:
         return ["Todos"] + self.available_states
@@ -105,7 +108,6 @@ class DashboardState(rx.State):
     
     @rx.var
     def metric_labels(self) -> dict:
-        """Etiquetas amigables para las métricas"""
         return {
             "total_sales": "Ventas Totales ($)",
             "avg_sales": "Promedio de Ventas ($)",
@@ -113,7 +115,31 @@ class DashboardState(rx.State):
             "avg_ticket": "Ticket Promedio ($)"
         }
     
-    # ==================== EVENTOS ORIGINALES ====================
+    @rx.var
+    def active_filters_text(self) -> str:
+        """Texto descriptivo de filtros activos"""
+        filters = []
+        if self.start_date and self.end_date:
+            filters.append(f"📅 {self.start_date} al {self.end_date}")
+        if self.selected_state_filter:
+            filters.append(f"📍 Estado: {self.selected_state_filter}")
+        if self.selected_category_filter:
+            filters.append(f"🏷️ Categoría: {self.selected_category_filter}")
+        
+        return " | ".join(filters) if filters else "Sin filtros aplicados"
+    
+    @rx.var
+    def has_active_filters(self) -> bool:
+        """Verifica si hay filtros activos"""
+        return bool(self.selected_state_filter or self.selected_category_filter)
+    
+    # ==================== NAVEGACIÓN ====================
+    
+    def navigate_to(self, page: str):
+        """Cambia la página actual"""
+        self.current_page = page
+    
+    # ==================== EVENTOS PRINCIPALES ====================
     
     def on_mount(self):
         """Se ejecuta al cargar la página"""
@@ -139,21 +165,31 @@ class DashboardState(rx.State):
         self.available_categories = db.get_available_categories()
         
         # Cargar datos
-        self.refresh_data()
+        self.refresh_all_data()
         self.is_loading = False
     
-    def refresh_data(self):
-        """Actualiza todos los datos del dashboard"""
+    def refresh_all_data(self):
+        """Actualiza todos los datos con filtros globales"""
         self.is_loading = True
+        
+        # Preparar filtros
+        state_filter = self.selected_state_filter if self.selected_state_filter else None
+        category_filter = self.selected_category_filter if self.selected_category_filter else None
         
         # Métricas generales
         self.overview_metrics = db.get_overview_metrics(
-            self.start_date if self.start_date else None,
-            self.end_date if self.end_date else None
+            start_date=self.start_date if self.start_date else None,
+            end_date=self.end_date if self.end_date else None,
+            state_filter=state_filter,
+            category_filter=category_filter
         )
         
-        # Top Estados - preparar para gráfico Recharts
-        df_top = db.get_top_states_by_sales(self.start_date, self.end_date, 10)
+        # Top Estados
+        df_top = db.get_top_states_by_sales(
+            self.start_date, self.end_date, 10,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         if not df_top.empty:
             self.top_states_chart = [
                 {
@@ -165,7 +201,11 @@ class DashboardState(rx.State):
             ]
         
         # Bottom Estados
-        df_bottom = db.get_bottom_states_by_sales(self.start_date, self.end_date, 10)
+        df_bottom = db.get_bottom_states_by_sales(
+            self.start_date, self.end_date, 10,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         if not df_bottom.empty:
             self.bottom_states_chart = [
                 {
@@ -176,8 +216,12 @@ class DashboardState(rx.State):
                 for _, row in df_bottom.iterrows()
             ]
         
-        # Categorías - preparar para gráfico Recharts
-        df_categories = db.get_top_categories(self.start_date, self.end_date, 10)
+        # Categorías
+        df_categories = db.get_top_categories(
+            self.start_date, self.end_date, 10,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         if not df_categories.empty:
             self.categories_chart = [
                 {
@@ -189,15 +233,27 @@ class DashboardState(rx.State):
             ]
         
         # Top producto
-        df_product = db.get_top_product(self.start_date, self.end_date)
+        df_product = db.get_top_product(
+            self.start_date, self.end_date,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         self.top_product_data = df_product.iloc[0].to_dict() if not df_product.empty else {}
         
         # Top vendedor
-        df_seller = db.get_top_seller(self.start_date, self.end_date)
+        df_seller = db.get_top_seller(
+            self.start_date, self.end_date,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         self.top_seller_data = df_seller.iloc[0].to_dict() if not df_seller.empty else {}
         
         # Top cliente
-        df_customer = db.get_top_customer(self.start_date, self.end_date)
+        df_customer = db.get_top_customer(
+            self.start_date, self.end_date,
+            state_filter=state_filter,
+            category_filter=category_filter
+        )
         self.top_customer_data = df_customer.iloc[0].to_dict() if not df_customer.empty else {}
         
         # Estadísticas
@@ -205,14 +261,21 @@ class DashboardState(rx.State):
         self.is_loading = False
     
     def calculate_statistics(self):
-        """Calcula estadísticas"""
+        """Calcula estadísticas con filtros globales"""
+        state_filter = self.selected_state_filter if self.selected_state_filter else None
+        category_filter = self.selected_category_filter if self.selected_category_filter else None
+        
         self.statistics_data = db.get_statistics(
             metric=self.selected_metric,
             group_by=self.selected_group if self.selected_filter_value else None,
             filter_value=self.selected_filter_value if self.selected_filter_value else None,
             start_date=self.start_date if self.start_date else None,
-            end_date=self.end_date if self.end_date else None
+            end_date=self.end_date if self.end_date else None,
+            state_filter=state_filter,
+            category_filter=category_filter
         )
+    
+    # ==================== EVENTOS DE FILTROS ====================
     
     def set_start_date(self, value: str):
         self.start_date = value
@@ -220,9 +283,22 @@ class DashboardState(rx.State):
     def set_end_date(self, value: str):
         self.end_date = value
     
-    def apply_date_filter(self):
-        self.refresh_data()
-        # Recargar también los gráficos Plotly si ya están cargados
+    def set_state_filter(self, value: str):
+        if value == "Todos":
+            self.selected_state_filter = ""
+        else:
+            self.selected_state_filter = value
+    
+    def set_category_filter(self, value: str):
+        if value == "Todas":
+            self.selected_category_filter = ""
+        else:
+            self.selected_category_filter = value
+    
+    def apply_global_filters(self):
+        """Aplica filtros globales a todo el dashboard"""
+        self.refresh_all_data()
+        # Recargar gráficos Plotly si están cargados
         if self.fig_states_plotly.data:
             self.load_states_plotly()
         if self.fig_cities_plotly.data:
@@ -231,6 +307,12 @@ class DashboardState(rx.State):
             self.load_categories_plotly()
         if self.fig_sellers_plotly.data:
             self.load_sellers_plotly()
+    
+    def clear_global_filters(self):
+        """Limpia todos los filtros globales"""
+        self.selected_state_filter = ""
+        self.selected_category_filter = ""
+        self.apply_global_filters()
     
     def set_metric(self, value: str):
         self.selected_metric = value
@@ -247,7 +329,7 @@ class DashboardState(rx.State):
             self.selected_filter_value = value
         self.calculate_statistics()
     
-    # ==================== NUEVOS EVENTOS PARA GRÁFICOS PLOTLY ====================
+    # ==================== EVENTOS PARA GRÁFICOS PLOTLY ====================
     
     @rx.event
     def load_states_plotly(self):
@@ -255,18 +337,21 @@ class DashboardState(rx.State):
         self.loading_chart_states = True
         
         try:
-            # Obtener datos
+            state_filter = self.selected_state_filter if self.selected_state_filter else None
+            category_filter = self.selected_category_filter if self.selected_category_filter else None
+            
             data = db.get_sales_by_state_dynamic(
                 start_date=self.start_date if self.start_date else None,
                 end_date=self.end_date if self.end_date else None,
                 metric=self.selected_metric_state,
-                limit=int(self.num_states_to_show)
+                limit=int(self.num_states_to_show),
+                state_filter=state_filter,
+                category_filter=category_filter
             )
             
             if data:
                 df = pd.DataFrame(data)
                 
-                # Crear gráfico
                 self.fig_states_plotly = px.bar(
                     df,
                     x=self.selected_metric_state,
@@ -294,13 +379,11 @@ class DashboardState(rx.State):
     
     @rx.event
     def update_metric_state(self, metric: str):
-        """Actualiza la métrica del gráfico de estados"""
         self.selected_metric_state = metric
         self.load_states_plotly()
     
     @rx.event
     def update_limit_state(self, limit: str):
-        """Actualiza la cantidad de estados"""
         try:
             self.num_states_to_show = str(max(5, int(limit)))
         except:
@@ -313,11 +396,16 @@ class DashboardState(rx.State):
         self.loading_chart_cities = True
         
         try:
+            state_filter = self.selected_state_filter if self.selected_state_filter else None
+            category_filter = self.selected_category_filter if self.selected_category_filter else None
+            
             data = db.get_sales_by_city_dynamic(
                 start_date=self.start_date if self.start_date else None,
                 end_date=self.end_date if self.end_date else None,
                 metric=self.selected_metric_city,
-                limit=int(self.num_cities_to_show)
+                limit=int(self.num_cities_to_show),
+                state_filter=state_filter,
+                category_filter=category_filter
             )
             
             if data:
@@ -349,13 +437,11 @@ class DashboardState(rx.State):
     
     @rx.event
     def update_metric_city(self, metric: str):
-        """Actualiza la métrica del gráfico de ciudades"""
         self.selected_metric_city = metric
         self.load_cities_plotly()
     
     @rx.event
     def update_limit_city(self, limit: str):
-        """Actualiza la cantidad de ciudades"""
         try:
             self.num_cities_to_show = str(max(5, int(limit)))
         except:
@@ -368,11 +454,16 @@ class DashboardState(rx.State):
         self.loading_chart_categories = True
         
         try:
+            state_filter = self.selected_state_filter if self.selected_state_filter else None
+            category_filter = self.selected_category_filter if self.selected_category_filter else None
+            
             data = db.get_sales_by_category_dynamic(
                 start_date=self.start_date if self.start_date else None,
                 end_date=self.end_date if self.end_date else None,
                 metric=self.selected_metric_category,
-                limit=int(self.num_categories_to_show)
+                limit=int(self.num_categories_to_show),
+                state_filter=state_filter,
+                category_filter=category_filter
             )
             
             if data:
@@ -404,13 +495,11 @@ class DashboardState(rx.State):
     
     @rx.event
     def update_metric_category(self, metric: str):
-        """Actualiza la métrica del gráfico de categorías"""
         self.selected_metric_category = metric
         self.load_categories_plotly()
     
     @rx.event
     def update_limit_category(self, limit: str):
-        """Actualiza la cantidad de categorías"""
         try:
             self.num_categories_to_show = str(max(5, int(limit)))
         except:
@@ -423,16 +512,20 @@ class DashboardState(rx.State):
         self.loading_chart_sellers = True
         
         try:
+            state_filter = self.selected_state_filter if self.selected_state_filter else None
+            category_filter = self.selected_category_filter if self.selected_category_filter else None
+            
             data = db.get_sales_by_seller_dynamic(
                 start_date=self.start_date if self.start_date else None,
                 end_date=self.end_date if self.end_date else None,
                 metric=self.selected_metric_seller,
-                limit=int(self.num_sellers_to_show)
+                limit=int(self.num_sellers_to_show),
+                state_filter=state_filter,
+                category_filter=category_filter
             )
             
             if data:
                 df = pd.DataFrame(data)
-                # Truncar IDs largos
                 df['seller_display'] = df['seller_id'].str[:15]
                 
                 self.fig_sellers_plotly = px.bar(
@@ -461,13 +554,11 @@ class DashboardState(rx.State):
     
     @rx.event
     def update_metric_seller(self, metric: str):
-        """Actualiza la métrica del gráfico de vendedores"""
         self.selected_metric_seller = metric
         self.load_sellers_plotly()
     
     @rx.event
     def update_limit_seller(self, limit: str):
-        """Actualiza la cantidad de vendedores"""
         try:
             self.num_sellers_to_show = str(max(5, int(limit)))
         except:
@@ -483,10 +574,56 @@ class DashboardState(rx.State):
         self.load_sellers_plotly()
 
 
-# ==================== COMPONENTES UI ORIGINALES ====================
+# ==================== COMPONENTES UI ====================
+
+def navbar() -> rx.Component:
+    """Barra de navegación del dashboard"""
+    return rx.box(
+        rx.hstack(
+            rx.heading("📊 Dashboard Analytics", size="6"),
+            rx.spacer(),
+            rx.hstack(
+                nav_button("📈 Overview", "overview"),
+                nav_button("📊 Gráficos", "charts"),
+                nav_button("🔍 Análisis", "analysis"),
+                nav_button("📐 Estadísticas", "statistics"),
+                spacing="2",
+            ),
+            width="100%",
+            align="center",
+            padding="1em",
+        ),
+        style={
+            "background": "var(--gray-3)",
+            "border_bottom": "1px solid var(--gray-6)",
+            "position": "sticky",
+            "top": "0",
+            "z_index": "1000",
+        }
+    )
+
+
+def nav_button(label: str, page: str) -> rx.Component:
+    """Botón de navegación"""
+    return rx.button(
+        label,
+        on_click=lambda: DashboardState.navigate_to(page),
+        variant=rx.cond(
+            DashboardState.current_page == page,
+            "solid",
+            "soft"
+        ),
+        color_scheme=rx.cond(
+            DashboardState.current_page == page,
+            "blue",
+            "gray"
+        ),
+        size="2",
+    )
+
 
 def metric_card(title: str, value: str, subtitle: str = "", icon: str = "📊", color: str = "blue") -> rx.Component:
-    """Tarjeta de métrica con color"""
+    """Tarjeta de métrica"""
     return rx.card(
         rx.vstack(
             rx.hstack(
@@ -504,6 +641,125 @@ def metric_card(title: str, value: str, subtitle: str = "", icon: str = "📊", 
             align="start",
         ),
         style={"padding": "1.5em", "height": "100%", "background": "var(--gray-2)"}
+    )
+
+
+def global_filters_section() -> rx.Component:
+    """Sección de filtros globales mejorada"""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.heading("🔍 Filtros Globales", size="5"),
+                rx.spacer(),
+                rx.cond(
+                    DashboardState.has_active_filters,
+                    rx.button(
+                        "🗑️ Limpiar Filtros",
+                        on_click=DashboardState.clear_global_filters,
+                        size="2",
+                        color_scheme="red",
+                        variant="soft",
+                    ),
+                ),
+                width="100%",
+                align="center",
+            ),
+            
+            rx.divider(),
+            
+            # Indicador de filtros activos
+            rx.callout(
+                rx.text(DashboardState.active_filters_text, size="2"),
+                icon="filter",
+                color_scheme=rx.cond(
+                    DashboardState.has_active_filters,
+                    "blue",
+                    "gray"
+                ),
+            ),
+            
+            # Grid de filtros
+            rx.grid(
+                # Rango de fechas
+                rx.vstack(
+                    rx.text("📅 Fecha Inicio", size="2", weight="bold"),
+                    rx.input(
+                        type="date",
+                        value=DashboardState.start_date,
+                        on_change=DashboardState.set_start_date,
+                        min=DashboardState.min_available_date,
+                        max=DashboardState.max_available_date,
+                        size="2",
+                    ),
+                    align="start",
+                    spacing="1",
+                ),
+                rx.vstack(
+                    rx.text("📅 Fecha Fin", size="2", weight="bold"),
+                    rx.input(
+                        type="date",
+                        value=DashboardState.end_date,
+                        on_change=DashboardState.set_end_date,
+                        min=DashboardState.min_available_date,
+                        max=DashboardState.max_available_date,
+                        size="2",
+                    ),
+                    align="start",
+                    spacing="1",
+                ),
+                # Filtro por Estado
+                rx.vstack(
+                    rx.text("📍 Estado", size="2", weight="bold"),
+                    rx.select(
+                        DashboardState.states_filter_options,
+                        placeholder="Todos los estados",
+                        value=rx.cond(
+                            DashboardState.selected_state_filter == "",
+                            "Todos",
+                            DashboardState.selected_state_filter
+                        ),
+                        on_change=DashboardState.set_state_filter,
+                        size="2",
+                    ),
+                    align="start",
+                    spacing="1",
+                ),
+                # Filtro por Categoría
+                rx.vstack(
+                    rx.text("🏷️ Categoría", size="2", weight="bold"),
+                    rx.select(
+                        DashboardState.categories_filter_options,
+                        placeholder="Todas las categorías",
+                        value=rx.cond(
+                            DashboardState.selected_category_filter == "",
+                            "Todas",
+                            DashboardState.selected_category_filter
+                        ),
+                        on_change=DashboardState.set_category_filter,
+                        size="2",
+                    ),
+                    align="start",
+                    spacing="1",
+                ),
+                columns="4",
+                spacing="3",
+                width="100%",
+            ),
+            
+            # Botón aplicar
+            rx.button(
+                "✅ Aplicar Filtros",
+                on_click=DashboardState.apply_global_filters,
+                size="3",
+                color_scheme="blue",
+                width="100%",
+            ),
+            
+            spacing="3",
+            align="start",
+            width="100%",
+        ),
+        style={"padding": "1.5em", "background": "var(--gray-2)"}
     )
 
 
@@ -615,144 +871,6 @@ def stats_grid(title: str, stats: dict) -> rx.Component:
     )
 
 
-def filter_section() -> rx.Component:
-    """Sección de filtros mejorada"""
-    return rx.card(
-        rx.vstack(
-            rx.heading("🔍 Filtros y Configuración", size="5"),
-            rx.divider(),
-            
-            # Filtros de fecha
-            rx.vstack(
-                rx.heading("📅 Rango de Fechas", size="3", color="gray"),
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Desde", size="2", weight="bold"),
-                        rx.input(
-                            type="date",
-                            value=DashboardState.start_date,
-                            on_change=DashboardState.set_start_date,
-                            min=DashboardState.min_available_date,
-                            max=DashboardState.max_available_date,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                        flex="1",
-                    ),
-                    rx.vstack(
-                        rx.text("Hasta", size="2", weight="bold"),
-                        rx.input(
-                            type="date",
-                            value=DashboardState.end_date,
-                            on_change=DashboardState.set_end_date,
-                            min=DashboardState.min_available_date,
-                            max=DashboardState.max_available_date,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                        flex="1",
-                    ),
-                    rx.button(
-                        "Aplicar",
-                        on_click=DashboardState.apply_date_filter,
-                        size="3",
-                        style={"margin_top": "1.8em"},
-                        color_scheme="blue",
-                    ),
-                    spacing="3",
-                    width="100%",
-                ),
-                spacing="2",
-                width="100%",
-            ),
-            
-            rx.divider(),
-            
-            # Filtros estadísticos
-            rx.vstack(
-                rx.heading("📊 Análisis Estadístico", size="3", color="gray"),
-                rx.grid(
-                    rx.vstack(
-                        rx.text("Métrica", size="2", weight="bold"),
-                        rx.select(
-                            ["total", "price", "freight_value"],
-                            value=DashboardState.selected_metric,
-                            on_change=DashboardState.set_metric,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                    ),
-                    rx.vstack(
-                        rx.text("Agrupar por", size="2", weight="bold"),
-                        rx.select(
-                            ["customer_state", "seller_state", "customer_city", "product_category_name"],
-                            value=DashboardState.selected_group,
-                            on_change=DashboardState.set_group,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                    ),
-                    columns="2",
-                    spacing="3",
-                    width="100%",
-                ),
-                rx.cond(
-                    DashboardState.selected_group == "customer_state",
-                    rx.vstack(
-                        rx.text("Filtrar Estado", size="2", weight="bold"),
-                        rx.select(
-                            DashboardState.states_options,
-                            placeholder="Selecciona un estado",
-                            value=rx.cond(
-                                DashboardState.selected_filter_value == "",
-                                "Todos",
-                                DashboardState.selected_filter_value
-                            ),
-                            on_change=DashboardState.set_filter_value,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                        width="100%",
-                    ),
-                ),
-                rx.cond(
-                    DashboardState.selected_group == "product_category_name",
-                    rx.vstack(
-                        rx.text("Filtrar Categoría", size="2", weight="bold"),
-                        rx.select(
-                            DashboardState.categories_options,
-                            placeholder="Selecciona una categoría",
-                            value=rx.cond(
-                                DashboardState.selected_filter_value == "",
-                                "Todas",
-                                DashboardState.selected_filter_value
-                            ),
-                            on_change=DashboardState.set_filter_value,
-                            size="3",
-                        ),
-                        align="start",
-                        spacing="1",
-                        width="100%",
-                    ),
-                ),
-                spacing="3",
-                width="100%",
-            ),
-            
-            spacing="4",
-            align="start",
-            width="100%",
-        ),
-        style={"padding": "1.5em", "background": "var(--gray-2)"}
-    )
-
-# ==================== NUEVOS COMPONENTES PARA GRÁFICOS PLOTLY ====================
-
 def plotly_chart_card(
     title: str,
     figure: go.Figure,
@@ -768,10 +886,7 @@ def plotly_chart_card(
     """Card para gráficos Plotly con controles dinámicos"""
     return rx.card(
         rx.vstack(
-            # Título
             rx.heading(title, size="6", color=f"{color}.11"),
-            
-            # Controles
             rx.hstack(
                 rx.vstack(
                     rx.text("Métrica", size="2", weight="bold"),
@@ -800,11 +915,7 @@ def plotly_chart_card(
                 spacing="4",
                 width="100%",
             ),
-            
-            # Separador
             rx.divider(),
-            
-            # Gráfico o loading
             rx.cond(
                 loading,
                 rx.center(
@@ -817,7 +928,6 @@ def plotly_chart_card(
                 ),
                 rx.plotly(data=figure, layout={"responsive": True})
             ),
-            
             spacing="4",
             width="100%",
         ),
@@ -825,99 +935,6 @@ def plotly_chart_card(
         style={"padding": "2em"}
     )
 
-
-def plotly_charts_section() -> rx.Component:
-    """Sección de gráficos Plotly dinámicos"""
-    return rx.vstack(
-        # Header con botón para cargar todos
-        rx.card(
-            rx.hstack(
-                rx.heading("📈 Gráficos Interactivos Dinámicos", size="6"),
-                rx.spacer(),
-                rx.button(
-                    "🔄 Cargar Todos los Gráficos",
-                    on_click=DashboardState.load_all_plotly_charts,
-                    size="3",
-                    color_scheme="blue",
-                ),
-                width="100%",
-                align="center",
-            ),
-            style={"padding": "1.5em", "background": "var(--gray-2)"}
-        ),
-        
-        rx.callout(
-            rx.text("💡 Usa los selectores para cambiar la métrica y la cantidad de resultados mostrados"),
-            icon="info",
-            color="white",
-        ),
-        
-        # Grid de gráficos
-        rx.grid(
-            # Gráfico por Estado
-            plotly_chart_card(
-                title="📍 Ventas por Estado",
-                figure=DashboardState.fig_states_plotly,
-                loading=DashboardState.loading_chart_states,
-                on_metric_change=DashboardState.update_metric_state,
-                on_limit_change=DashboardState.update_limit_state,
-                metric_options=DashboardState.metric_options,
-                limit_options=DashboardState.limit_options,
-                selected_metric=DashboardState.selected_metric_state,
-                selected_limit=DashboardState.num_states_to_show,
-                color="blue",
-            ),
-            
-            # Gráfico por Ciudad
-            plotly_chart_card(
-                title="🏙️ Ventas por Ciudad",
-                figure=DashboardState.fig_cities_plotly,
-                loading=DashboardState.loading_chart_cities,
-                on_metric_change=DashboardState.update_metric_city,
-                on_limit_change=DashboardState.update_limit_city,
-                metric_options=DashboardState.metric_options,
-                limit_options=DashboardState.limit_options,
-                selected_metric=DashboardState.selected_metric_city,
-                selected_limit=DashboardState.num_cities_to_show,
-                color="green",
-            ),
-            
-            # Gráfico por Categoría
-            plotly_chart_card(
-                title="🏷️ Ventas por Categoría",
-                figure=DashboardState.fig_categories_plotly,
-                loading=DashboardState.loading_chart_categories,
-                on_metric_change=DashboardState.update_metric_category,
-                on_limit_change=DashboardState.update_limit_category,
-                metric_options=DashboardState.metric_options,
-                limit_options=DashboardState.limit_options,
-                selected_metric=DashboardState.selected_metric_category,
-                selected_limit=DashboardState.num_categories_to_show,
-                color="purple",
-            ),
-            
-            # Gráfico por Vendedor
-            plotly_chart_card(
-                title="🏪 Ventas por Vendedor",
-                figure=DashboardState.fig_sellers_plotly,
-                loading=DashboardState.loading_chart_sellers,
-                on_metric_change=DashboardState.update_metric_seller,
-                on_limit_change=DashboardState.update_limit_seller,
-                metric_options=DashboardState.metric_options,
-                limit_options=DashboardState.limit_options,
-                selected_metric=DashboardState.selected_metric_seller,
-                selected_limit=DashboardState.num_sellers_to_show,
-                color="orange",
-            ),
-            
-            columns="1",
-            spacing="5",
-            width="100%",
-        ),
-        
-        spacing="4",
-        width="100%",
-    )
 
 def overview_metrics() -> rx.Component:
     """Métricas generales en tarjetas"""
@@ -1025,7 +1042,6 @@ def top_performers() -> rx.Component:
             ),
             style={"padding": "1.5em", "height": "100%"}
         ),
-        
         # Top Cliente
         rx.card(
             rx.vstack(
@@ -1085,7 +1101,6 @@ def top_performers() -> rx.Component:
             ),
             style={"padding": "1.5em", "height": "100%"}
         ),
-        
         # Top Producto
         rx.card(
             rx.vstack(
@@ -1146,18 +1161,107 @@ def top_performers() -> rx.Component:
             ),
             style={"padding": "1.5em", "height": "100%"}
         ),
-        
         columns="3",
         spacing="4",
     )
 
 
-def charts_section_recharts() -> rx.Component:
-    """Sección de gráficos Recharts originales"""
+def overview_page() -> rx.Component:
+    """Página Overview"""
     return rx.vstack(
-        rx.heading("📊 Gráficos con Recharts (Originales)", size="6"),
-        
-        # Gráfico: Top Estados
+        rx.heading("📈 Vista General", size="7"),
+        overview_metrics(),
+        top_performers(),
+        spacing="5",
+        width="100%",
+    )
+
+
+def charts_page() -> rx.Component:
+    """Página de Gráficos Plotly"""
+    return rx.vstack(
+        rx.card(
+            rx.hstack(
+                rx.heading("📊 Gráficos Interactivos Dinámicos", size="6"),
+                rx.spacer(),
+                rx.button(
+                    "🔄 Cargar Todos los Gráficos",
+                    on_click=DashboardState.load_all_plotly_charts,
+                    size="3",
+                    color_scheme="blue",
+                ),
+                width="100%",
+                align="center",
+            ),
+            style={"padding": "1.5em", "background": "var(--gray-2)"}
+        ),
+        rx.callout(
+            rx.text("💡 Usa los selectores para cambiar la métrica y la cantidad de resultados mostrados"),
+            icon="info",
+            color="white",
+        ),
+        rx.grid(
+            plotly_chart_card(
+                title="📍 Ventas por Estado",
+                figure=DashboardState.fig_states_plotly,
+                loading=DashboardState.loading_chart_states,
+                on_metric_change=DashboardState.update_metric_state,
+                on_limit_change=DashboardState.update_limit_state,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_state,
+                selected_limit=DashboardState.num_states_to_show,
+                color="blue",
+            ),
+            plotly_chart_card(
+                title="🏙️ Ventas por Ciudad",
+                figure=DashboardState.fig_cities_plotly,
+                loading=DashboardState.loading_chart_cities,
+                on_metric_change=DashboardState.update_metric_city,
+                on_limit_change=DashboardState.update_limit_city,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_city,
+                selected_limit=DashboardState.num_cities_to_show,
+                color="green",
+            ),
+            plotly_chart_card(
+                title="🏷️ Ventas por Categoría",
+                figure=DashboardState.fig_categories_plotly,
+                loading=DashboardState.loading_chart_categories,
+                on_metric_change=DashboardState.update_metric_category,
+                on_limit_change=DashboardState.update_limit_category,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_category,
+                selected_limit=DashboardState.num_categories_to_show,
+                color="purple",
+            ),
+            plotly_chart_card(
+                title="🏪 Ventas por Vendedor",
+                figure=DashboardState.fig_sellers_plotly,
+                loading=DashboardState.loading_chart_sellers,
+                on_metric_change=DashboardState.update_metric_seller,
+                on_limit_change=DashboardState.update_limit_seller,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_seller,
+                selected_limit=DashboardState.num_sellers_to_show,
+                color="orange",
+            ),
+            columns="1",
+            spacing="5",
+            width="100%",
+        ),
+        spacing="4",
+        width="100%",
+    )
+
+
+def analysis_page() -> rx.Component:
+    """Página de Análisis (Gráficos Recharts)"""
+    return rx.vstack(
+        rx.heading("🔍 Análisis por Dimensión", size="7"),
         rx.card(
             rx.vstack(
                 rx.heading("📊 Top 10 Estados por Ventas", size="5"),
@@ -1187,8 +1291,6 @@ def charts_section_recharts() -> rx.Component:
             ),
             style={"padding": "2em"}
         ),
-        
-        # Gráfico: Categorías
         rx.card(
             rx.vstack(
                 rx.heading("🏷️ Top 10 Categorías por Ventas", size="5"),
@@ -1223,8 +1325,6 @@ def charts_section_recharts() -> rx.Component:
             ),
             style={"padding": "2em"}
         ),
-        
-        # Gráfico: Bottom Estados
         rx.card(
             rx.vstack(
                 rx.heading("📉 Bottom 10 Estados por Ventas", size="5"),
@@ -1254,7 +1354,91 @@ def charts_section_recharts() -> rx.Component:
             ),
             style={"padding": "2em"}
         ),
-        
+        spacing="4",
+        width="100%",
+    )
+
+
+def statistics_page() -> rx.Component:
+    """Página de Estadísticas"""
+    return rx.vstack(
+        rx.heading("📐 Análisis Estadístico", size="7"),
+        rx.card(
+            rx.vstack(
+                rx.heading("🔧 Configuración de Análisis", size="5", color="gray"),
+                rx.grid(
+                    rx.vstack(
+                        rx.text("Métrica", size="2", weight="bold"),
+                        rx.select(
+                            ["total", "price", "freight_value"],
+                            value=DashboardState.selected_metric,
+                            on_change=DashboardState.set_metric,
+                            size="3",
+                        ),
+                        align="start",
+                        spacing="1",
+                    ),
+                    rx.vstack(
+                        rx.text("Agrupar por", size="2", weight="bold"),
+                        rx.select(
+                            ["customer_state", "seller_state", "customer_city", "product_category_name"],
+                            value=DashboardState.selected_group,
+                            on_change=DashboardState.set_group,
+                            size="3",
+                        ),
+                        align="start",
+                        spacing="1",
+                    ),
+                    columns="2",
+                    spacing="3",
+                    width="100%",
+                ),
+                rx.cond(
+                    DashboardState.selected_group == "customer_state",
+                    rx.vstack(
+                        rx.text("Filtrar Estado", size="2", weight="bold"),
+                        rx.select(
+                            DashboardState.states_options,
+                            placeholder="Selecciona un estado",
+                            value=rx.cond(
+                                DashboardState.selected_filter_value == "",
+                                "Todos",
+                                DashboardState.selected_filter_value
+                            ),
+                            on_change=DashboardState.set_filter_value,
+                            size="3",
+                        ),
+                        align="start",
+                        spacing="1",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    DashboardState.selected_group == "product_category_name",
+                    rx.vstack(
+                        rx.text("Filtrar Categoría", size="2", weight="bold"),
+                        rx.select(
+                            DashboardState.categories_options,
+                            placeholder="Selecciona una categoría",
+                            value=rx.cond(
+                                DashboardState.selected_filter_value == "",
+                                "Todas",
+                                DashboardState.selected_filter_value
+                            ),
+                            on_change=DashboardState.set_filter_value,
+                            size="3",
+                        ),
+                        align="start",
+                        spacing="1",
+                        width="100%",
+                    ),
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            style={"padding": "1.5em", "background": "var(--gray-2)"}
+        ),
+        stats_grid("📊 Análisis Estadístico Descriptivo", DashboardState.statistics_data),
         spacing="4",
         width="100%",
     )
@@ -1262,50 +1446,55 @@ def charts_section_recharts() -> rx.Component:
 
 def index() -> rx.Component:
     """Página principal del dashboard"""
-    return rx.container(
-        rx.vstack(
-            # Header
-            rx.hstack(
-                rx.vstack(
-                    rx.heading("📈 Dashboard Analytics - Versión Mejorada", size="8"),
-                    rx.text("Sistema de análisis de ventas con visualizaciones interactivas Recharts + Plotly", size="4", color="gray"),
-                    spacing="1",
-                    align="start",
+    return rx.box(
+        navbar(),
+        rx.container(
+            rx.vstack(
+                # Header con loading
+                rx.hstack(
+                    rx.vstack(
+                        rx.heading("Dashboard Analytics - Versión Mejorada", size="8"),
+                        rx.text("Sistema de análisis con filtros globales y navegación por secciones", size="4", color="gray"),
+                        spacing="1",
+                        align="start",
+                    ),
+                    rx.spacer(),
+                    rx.cond(
+                        DashboardState.is_loading,
+                        rx.spinner(size="3"),
+                    ),
+                    width="100%",
+                    align="center",
                 ),
-                rx.spacer(),
+                rx.divider(size="4"),
+                
+                # Filtros globales (siempre visibles)
+                global_filters_section(),
+                
+                # Contenido según página activa
                 rx.cond(
-                    DashboardState.is_loading,
-                    rx.spinner(size="3"),
+                    DashboardState.current_page == "overview",
+                    overview_page(),
                 ),
+                rx.cond(
+                    DashboardState.current_page == "charts",
+                    charts_page(),
+                ),
+                rx.cond(
+                    DashboardState.current_page == "analysis",
+                    analysis_page(),
+                ),
+                rx.cond(
+                    DashboardState.current_page == "statistics",
+                    statistics_page(),
+                ),
+                
+                spacing="5",
                 width="100%",
-                align="center",
+                padding="2em",
             ),
-            
-            rx.divider(size="4"),
-            
-            # Filtros
-            filter_section(),
-            
-            # Métricas generales
-            overview_metrics(),
-            
-            # Top performers
-            top_performers(),
-            
-            # NUEVA SECCIÓN: Gráficos Plotly Dinámicos
-            plotly_charts_section(),
-            
-            # Gráficos Recharts Originales
-            charts_section_recharts(),
-            
-            # Estadísticas
-            stats_grid("📊 Análisis Estadístico Descriptivo", DashboardState.statistics_data),
-            
-            spacing="5",
-            width="100%",
-            padding="2em",
+            size="4",
         ),
-        size="4",
     )
 
 
