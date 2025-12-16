@@ -1,47 +1,81 @@
-"""Welcome to Reflex! This file outlines the steps to create a basic app."""
 """
-Dashboard Analytics - Aplicación con Gráficos Interactivos
+Dashboard Analytics - Versión Mejorada con Gráficos Plotly Dinámicos
 """
 import reflex as rx
 from datetime import datetime, timedelta
 from .database import db
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 class DashboardState(rx.State):
     """Estado principal del dashboard"""
     
-    # Filtros de fecha
+    # ==================== FILTROS DE FECHA ====================
     start_date: str = ""
     end_date: str = ""
     min_available_date: str = ""
     max_available_date: str = ""
     
-    # Filtros adicionales
+    # ==================== FILTROS ADICIONALES ====================
     selected_metric: str = "total"
     selected_group: str = "customer_state"
     selected_filter_value: str = ""
     
-    # Datos para gráficos (formato para Recharts)
+    # ==================== DATOS PARA GRÁFICOS RECHARTS (ORIGINALES) ====================
     top_states_chart: list[dict] = []
     bottom_states_chart: list[dict] = []
     categories_chart: list[dict] = []
     
-    # Datos para métricas
+    # ==================== DATOS PARA GRÁFICOS PLOTLY (NUEVOS) ====================
+    fig_states_plotly: go.Figure = go.Figure()
+    fig_cities_plotly: go.Figure = go.Figure()
+    fig_categories_plotly: go.Figure = go.Figure()
+    fig_sellers_plotly: go.Figure = go.Figure()
+    
+    # ==================== CONTROLES PARA GRÁFICOS DINÁMICOS ====================
+    # Estados
+    selected_metric_state: str = "total_sales"
+    num_states_to_show: str = "10"
+    
+    # Ciudades
+    selected_metric_city: str = "total_sales"
+    num_cities_to_show: str = "10"
+    
+    # Categorías
+    selected_metric_category: str = "total_sales"
+    num_categories_to_show: str = "10"
+    
+    # Vendedores
+    selected_metric_seller: str = "total_sales"
+    num_sellers_to_show: str = "10"
+    
+    # Opciones
+    metric_options: list[str] = ["total_sales", "avg_sales", "total_orders", "avg_ticket"]
+    limit_options: list[str] = ["5", "10", "15", "20", "25"]
+    
+    # ==================== FLAGS DE CARGA ====================
+    loading_chart_states: bool = False
+    loading_chart_cities: bool = False
+    loading_chart_categories: bool = False
+    loading_chart_sellers: bool = False
+    
+    # ==================== DATOS PARA MÉTRICAS (ORIGINALES) ====================
     top_product_data: dict = {}
     top_seller_data: dict = {}
     top_customer_data: dict = {}
     overview_metrics: dict = {}
     statistics_data: dict = {}
     
-    # Opciones para filtros
+    # ==================== OPCIONES PARA FILTROS ====================
     available_states: list[str] = []
     available_categories: list[str] = []
     
-    # Estado de carga
+    # ==================== ESTADO DE CARGA ====================
     is_loading: bool = False
     
-    # Computed vars
+    # ==================== COMPUTED VARS ====================
     @rx.var
     def states_options(self) -> list[str]:
         return ["Todos"] + self.available_states
@@ -54,7 +88,6 @@ class DashboardState(rx.State):
     def has_data(self) -> bool:
         return len(self.top_states_chart) > 0
     
-    # Computed vars para textos truncados
     @rx.var
     def seller_id_display(self) -> str:
         seller_id = self.top_seller_data.get('seller_id', 'N/A')
@@ -69,6 +102,18 @@ class DashboardState(rx.State):
     def product_id_display(self) -> str:
         product_id = self.top_product_data.get('product_id', 'N/A')
         return product_id[:20] if len(product_id) > 20 else product_id
+    
+    @rx.var
+    def metric_labels(self) -> dict:
+        """Etiquetas amigables para las métricas"""
+        return {
+            "total_sales": "Ventas Totales ($)",
+            "avg_sales": "Promedio de Ventas ($)",
+            "total_orders": "Total de Órdenes",
+            "avg_ticket": "Ticket Promedio ($)"
+        }
+    
+    # ==================== EVENTOS ORIGINALES ====================
     
     def on_mount(self):
         """Se ejecuta al cargar la página"""
@@ -107,7 +152,7 @@ class DashboardState(rx.State):
             self.end_date if self.end_date else None
         )
         
-        # Top Estados - preparar para gráfico
+        # Top Estados - preparar para gráfico Recharts
         df_top = db.get_top_states_by_sales(self.start_date, self.end_date, 10)
         if not df_top.empty:
             self.top_states_chart = [
@@ -131,12 +176,12 @@ class DashboardState(rx.State):
                 for _, row in df_bottom.iterrows()
             ]
         
-        # Categorías - preparar para gráfico
+        # Categorías - preparar para gráfico Recharts
         df_categories = db.get_top_categories(self.start_date, self.end_date, 10)
         if not df_categories.empty:
             self.categories_chart = [
                 {
-                    "categoria": row["categoria"][:20],  # Truncar nombres largos
+                    "categoria": row["categoria"][:20],
                     "ventas": float(row["ventas_totales"]),
                     "unidades": int(row["unidades_vendidas"])
                 }
@@ -177,6 +222,15 @@ class DashboardState(rx.State):
     
     def apply_date_filter(self):
         self.refresh_data()
+        # Recargar también los gráficos Plotly si ya están cargados
+        if self.fig_states_plotly.data:
+            self.load_states_plotly()
+        if self.fig_cities_plotly.data:
+            self.load_cities_plotly()
+        if self.fig_categories_plotly.data:
+            self.load_categories_plotly()
+        if self.fig_sellers_plotly.data:
+            self.load_sellers_plotly()
     
     def set_metric(self, value: str):
         self.selected_metric = value
@@ -192,9 +246,244 @@ class DashboardState(rx.State):
         else:
             self.selected_filter_value = value
         self.calculate_statistics()
+    
+    # ==================== NUEVOS EVENTOS PARA GRÁFICOS PLOTLY ====================
+    
+    @rx.event
+    def load_states_plotly(self):
+        """Carga el gráfico dinámico de estados con Plotly"""
+        self.loading_chart_states = True
+        
+        try:
+            # Obtener datos
+            data = db.get_sales_by_state_dynamic(
+                start_date=self.start_date if self.start_date else None,
+                end_date=self.end_date if self.end_date else None,
+                metric=self.selected_metric_state,
+                limit=int(self.num_states_to_show)
+            )
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                # Crear gráfico
+                self.fig_states_plotly = px.bar(
+                    df,
+                    x=self.selected_metric_state,
+                    y="state",
+                    orientation='h',
+                    text_auto='.2s',
+                    title=f"Ventas por Estado - {self.metric_labels[self.selected_metric_state]} (Top {self.num_states_to_show})",
+                    color=self.selected_metric_state,
+                    color_continuous_scale="Blues"
+                )
+                
+                self.fig_states_plotly.update_layout(
+                    autosize=True,
+                    height=600,
+                    xaxis_title=self.metric_labels[self.selected_metric_state],
+                    yaxis_title="Estado",
+                    showlegend=False,
+                    hovermode='closest'
+                )
+                
+        except Exception as e:
+            print(f"Error loading states chart: {e}")
+        finally:
+            self.loading_chart_states = False
+    
+    @rx.event
+    def update_metric_state(self, metric: str):
+        """Actualiza la métrica del gráfico de estados"""
+        self.selected_metric_state = metric
+        self.load_states_plotly()
+    
+    @rx.event
+    def update_limit_state(self, limit: str):
+        """Actualiza la cantidad de estados"""
+        try:
+            self.num_states_to_show = str(max(5, int(limit)))
+        except:
+            self.num_states_to_show = "10"
+        self.load_states_plotly()
+    
+    @rx.event
+    def load_cities_plotly(self):
+        """Carga el gráfico dinámico de ciudades con Plotly"""
+        self.loading_chart_cities = True
+        
+        try:
+            data = db.get_sales_by_city_dynamic(
+                start_date=self.start_date if self.start_date else None,
+                end_date=self.end_date if self.end_date else None,
+                metric=self.selected_metric_city,
+                limit=int(self.num_cities_to_show)
+            )
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                self.fig_cities_plotly = px.bar(
+                    df,
+                    x=self.selected_metric_city,
+                    y="city",
+                    orientation='h',
+                    text_auto='.2s',
+                    title=f"Ventas por Ciudad - {self.metric_labels[self.selected_metric_city]} (Top {self.num_cities_to_show})",
+                    color=self.selected_metric_city,
+                    color_continuous_scale="Greens"
+                )
+                
+                self.fig_cities_plotly.update_layout(
+                    autosize=True,
+                    height=600,
+                    xaxis_title=self.metric_labels[self.selected_metric_city],
+                    yaxis_title="Ciudad",
+                    showlegend=False
+                )
+                
+        except Exception as e:
+            print(f"Error loading cities chart: {e}")
+        finally:
+            self.loading_chart_cities = False
+    
+    @rx.event
+    def update_metric_city(self, metric: str):
+        """Actualiza la métrica del gráfico de ciudades"""
+        self.selected_metric_city = metric
+        self.load_cities_plotly()
+    
+    @rx.event
+    def update_limit_city(self, limit: str):
+        """Actualiza la cantidad de ciudades"""
+        try:
+            self.num_cities_to_show = str(max(5, int(limit)))
+        except:
+            self.num_cities_to_show = "10"
+        self.load_cities_plotly()
+    
+    @rx.event
+    def load_categories_plotly(self):
+        """Carga el gráfico dinámico de categorías con Plotly"""
+        self.loading_chart_categories = True
+        
+        try:
+            data = db.get_sales_by_category_dynamic(
+                start_date=self.start_date if self.start_date else None,
+                end_date=self.end_date if self.end_date else None,
+                metric=self.selected_metric_category,
+                limit=int(self.num_categories_to_show)
+            )
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                self.fig_categories_plotly = px.bar(
+                    df,
+                    x=self.selected_metric_category,
+                    y="category",
+                    orientation='h',
+                    text_auto='.2s',
+                    title=f"Ventas por Categoría - {self.metric_labels[self.selected_metric_category]} (Top {self.num_categories_to_show})",
+                    color=self.selected_metric_category,
+                    color_continuous_scale="Purples"
+                )
+                
+                self.fig_categories_plotly.update_layout(
+                    autosize=True,
+                    height=600,
+                    xaxis_title=self.metric_labels[self.selected_metric_category],
+                    yaxis_title="Categoría",
+                    showlegend=False
+                )
+                
+        except Exception as e:
+            print(f"Error loading categories chart: {e}")
+        finally:
+            self.loading_chart_categories = False
+    
+    @rx.event
+    def update_metric_category(self, metric: str):
+        """Actualiza la métrica del gráfico de categorías"""
+        self.selected_metric_category = metric
+        self.load_categories_plotly()
+    
+    @rx.event
+    def update_limit_category(self, limit: str):
+        """Actualiza la cantidad de categorías"""
+        try:
+            self.num_categories_to_show = str(max(5, int(limit)))
+        except:
+            self.num_categories_to_show = "10"
+        self.load_categories_plotly()
+    
+    @rx.event
+    def load_sellers_plotly(self):
+        """Carga el gráfico dinámico de vendedores con Plotly"""
+        self.loading_chart_sellers = True
+        
+        try:
+            data = db.get_sales_by_seller_dynamic(
+                start_date=self.start_date if self.start_date else None,
+                end_date=self.end_date if self.end_date else None,
+                metric=self.selected_metric_seller,
+                limit=int(self.num_sellers_to_show)
+            )
+            
+            if data:
+                df = pd.DataFrame(data)
+                # Truncar IDs largos
+                df['seller_display'] = df['seller_id'].str[:15]
+                
+                self.fig_sellers_plotly = px.bar(
+                    df,
+                    x=self.selected_metric_seller,
+                    y="seller_display",
+                    orientation='h',
+                    text_auto='.2s',
+                    title=f"Ventas por Vendedor - {self.metric_labels[self.selected_metric_seller]} (Top {self.num_sellers_to_show})",
+                    color=self.selected_metric_seller,
+                    color_continuous_scale="Oranges"
+                )
+                
+                self.fig_sellers_plotly.update_layout(
+                    autosize=True,
+                    height=600,
+                    xaxis_title=self.metric_labels[self.selected_metric_seller],
+                    yaxis_title="Vendedor",
+                    showlegend=False
+                )
+                
+        except Exception as e:
+            print(f"Error loading sellers chart: {e}")
+        finally:
+            self.loading_chart_sellers = False
+    
+    @rx.event
+    def update_metric_seller(self, metric: str):
+        """Actualiza la métrica del gráfico de vendedores"""
+        self.selected_metric_seller = metric
+        self.load_sellers_plotly()
+    
+    @rx.event
+    def update_limit_seller(self, limit: str):
+        """Actualiza la cantidad de vendedores"""
+        try:
+            self.num_sellers_to_show = str(max(5, int(limit)))
+        except:
+            self.num_sellers_to_show = "10"
+        self.load_sellers_plotly()
+    
+    @rx.event
+    def load_all_plotly_charts(self):
+        """Carga todos los gráficos Plotly"""
+        self.load_states_plotly()
+        self.load_cities_plotly()
+        self.load_categories_plotly()
+        self.load_sellers_plotly()
 
 
-# ==================== COMPONENTES UI ====================
+# ==================== COMPONENTES UI ORIGINALES ====================
 
 def metric_card(title: str, value: str, subtitle: str = "", icon: str = "📊", color: str = "blue") -> rx.Component:
     """Tarjeta de métrica con color"""
@@ -225,7 +514,6 @@ def stats_grid(title: str, stats: dict) -> rx.Component:
             rx.heading(title, size="5", margin_bottom="0.5em"),
             rx.divider(),
             rx.grid(
-                # Fila 1: Tendencia central
                 rx.box(
                     rx.vstack(
                         rx.text("Media", size="2", color="gray", weight="medium"),
@@ -258,7 +546,6 @@ def stats_grid(title: str, stats: dict) -> rx.Component:
                         align="start"
                     )
                 ),
-                # Fila 2: Cuartiles
                 rx.box(
                     rx.vstack(
                         rx.text("Q1 (25%)", size="2", color="gray", weight="medium"),
@@ -291,7 +578,6 @@ def stats_grid(title: str, stats: dict) -> rx.Component:
                         align="start"
                     )
                 ),
-                # Fila 3: Extremos
                 rx.box(
                     rx.vstack(
                         rx.text("Mínimo", size="2", color="gray", weight="medium"),
@@ -465,6 +751,173 @@ def filter_section() -> rx.Component:
         style={"padding": "1.5em", "background": "var(--gray-2)"}
     )
 
+# ==================== NUEVOS COMPONENTES PARA GRÁFICOS PLOTLY ====================
+
+def plotly_chart_card(
+    title: str,
+    figure: go.Figure,
+    loading: bool,
+    on_metric_change,
+    on_limit_change,
+    metric_options: list[str],
+    limit_options: list[str],
+    selected_metric: str,
+    selected_limit: str,
+    color: str = "blue"
+) -> rx.Component:
+    """Card para gráficos Plotly con controles dinámicos"""
+    return rx.card(
+        rx.vstack(
+            # Título
+            rx.heading(title, size="6", color=f"{color}.11"),
+            
+            # Controles
+            rx.hstack(
+                rx.vstack(
+                    rx.text("Métrica", size="2", weight="bold"),
+                    rx.select(
+                        metric_options,
+                        value=selected_metric,
+                        on_change=on_metric_change,
+                        placeholder="Seleccionar métrica",
+                        size="2",
+                    ),
+                    spacing="1",
+                    align="start",
+                ),
+                rx.vstack(
+                    rx.text("Top N", size="2", weight="bold"),
+                    rx.select(
+                        limit_options,
+                        value=selected_limit,
+                        on_change=on_limit_change,
+                        placeholder="Cantidad",
+                        size="2",
+                    ),
+                    spacing="1",
+                    align="start",
+                ),
+                spacing="4",
+                width="100%",
+            ),
+            
+            # Separador
+            rx.divider(),
+            
+            # Gráfico o loading
+            rx.cond(
+                loading,
+                rx.center(
+                    rx.vstack(
+                        rx.spinner(size="3"),
+                        rx.text("Cargando datos...", size="2"),
+                        spacing="2",
+                    ),
+                    height="500px",
+                ),
+                rx.plotly(data=figure, layout={"responsive": True})
+            ),
+            
+            spacing="4",
+            width="100%",
+        ),
+        width="100%",
+        style={"padding": "2em"}
+    )
+
+
+def plotly_charts_section() -> rx.Component:
+    """Sección de gráficos Plotly dinámicos"""
+    return rx.vstack(
+        # Header con botón para cargar todos
+        rx.card(
+            rx.hstack(
+                rx.heading("📈 Gráficos Interactivos Dinámicos", size="6"),
+                rx.spacer(),
+                rx.button(
+                    "🔄 Cargar Todos los Gráficos",
+                    on_click=DashboardState.load_all_plotly_charts,
+                    size="3",
+                    color_scheme="blue",
+                ),
+                width="100%",
+                align="center",
+            ),
+            style={"padding": "1.5em", "background": "var(--gray-2)"}
+        ),
+        
+        rx.callout(
+            rx.text("💡 Usa los selectores para cambiar la métrica y la cantidad de resultados mostrados"),
+            icon="info",
+            color="white",
+        ),
+        
+        # Grid de gráficos
+        rx.grid(
+            # Gráfico por Estado
+            plotly_chart_card(
+                title="📍 Ventas por Estado",
+                figure=DashboardState.fig_states_plotly,
+                loading=DashboardState.loading_chart_states,
+                on_metric_change=DashboardState.update_metric_state,
+                on_limit_change=DashboardState.update_limit_state,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_state,
+                selected_limit=DashboardState.num_states_to_show,
+                color="blue",
+            ),
+            
+            # Gráfico por Ciudad
+            plotly_chart_card(
+                title="🏙️ Ventas por Ciudad",
+                figure=DashboardState.fig_cities_plotly,
+                loading=DashboardState.loading_chart_cities,
+                on_metric_change=DashboardState.update_metric_city,
+                on_limit_change=DashboardState.update_limit_city,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_city,
+                selected_limit=DashboardState.num_cities_to_show,
+                color="green",
+            ),
+            
+            # Gráfico por Categoría
+            plotly_chart_card(
+                title="🏷️ Ventas por Categoría",
+                figure=DashboardState.fig_categories_plotly,
+                loading=DashboardState.loading_chart_categories,
+                on_metric_change=DashboardState.update_metric_category,
+                on_limit_change=DashboardState.update_limit_category,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_category,
+                selected_limit=DashboardState.num_categories_to_show,
+                color="purple",
+            ),
+            
+            # Gráfico por Vendedor
+            plotly_chart_card(
+                title="🏪 Ventas por Vendedor",
+                figure=DashboardState.fig_sellers_plotly,
+                loading=DashboardState.loading_chart_sellers,
+                on_metric_change=DashboardState.update_metric_seller,
+                on_limit_change=DashboardState.update_limit_seller,
+                metric_options=DashboardState.metric_options,
+                limit_options=DashboardState.limit_options,
+                selected_metric=DashboardState.selected_metric_seller,
+                selected_limit=DashboardState.num_sellers_to_show,
+                color="orange",
+            ),
+            
+            columns="1",
+            spacing="5",
+            width="100%",
+        ),
+        
+        spacing="4",
+        width="100%",
+    )
 
 def overview_metrics() -> rx.Component:
     """Métricas generales en tarjetas"""
@@ -473,7 +926,7 @@ def overview_metrics() -> rx.Component:
             "Total Órdenes",
             f"{DashboardState.overview_metrics.get('total_ordenes', 0):,.0f}",
             "Órdenes procesadas",
-            "🛍️",
+            "🛒",
             "blue"
         ),
         metric_card(
@@ -663,7 +1116,7 @@ def top_performers() -> rx.Component:
                                     f"{DashboardState.top_product_data.get('unidades_vendidas', 0):,.0f}",
                                     weight="bold",
                                     size="4",
-                                    color="blue"
+                                    color="white"
                                 ),
                                 spacing="2",
                             ),
@@ -699,10 +1152,12 @@ def top_performers() -> rx.Component:
     )
 
 
-def charts_section() -> rx.Component:
-    """Sección de gráficos completa"""
+def charts_section_recharts() -> rx.Component:
+    """Sección de gráficos Recharts originales"""
     return rx.vstack(
-        # 1. Gráfico: Top Estados (El que ya funciona)
+        rx.heading("📊 Gráficos con Recharts (Originales)", size="6"),
+        
+        # Gráfico: Top Estados
         rx.card(
             rx.vstack(
                 rx.heading("📊 Top 10 Estados por Ventas", size="5"),
@@ -733,7 +1188,7 @@ def charts_section() -> rx.Component:
             style={"padding": "2em"}
         ),
         
-        # 2. Gráfico: Categorías
+        # Gráfico: Categorías
         rx.card(
             rx.vstack(
                 rx.heading("🏷️ Top 10 Categorías por Ventas", size="5"),
@@ -745,7 +1200,6 @@ def charts_section() -> rx.Component:
                             data_key="ventas",
                             fill="#82ca9d",
                         ),
-                        # Ajustamos el eje X para que las etiquetas largas se lean bien
                         rx.recharts.x_axis(
                             data_key="categoria", 
                             angle=-45, 
@@ -770,7 +1224,7 @@ def charts_section() -> rx.Component:
             style={"padding": "2em"}
         ),
         
-        # 3. Gráfico: Bottom Estados
+        # Gráfico: Bottom Estados
         rx.card(
             rx.vstack(
                 rx.heading("📉 Bottom 10 Estados por Ventas", size="5"),
@@ -804,7 +1258,6 @@ def charts_section() -> rx.Component:
         spacing="4",
         width="100%",
     )
-    
 
 
 def index() -> rx.Component:
@@ -814,8 +1267,8 @@ def index() -> rx.Component:
             # Header
             rx.hstack(
                 rx.vstack(
-                    rx.heading("📈 Dashboard Analytics", size="8"),
-                    rx.text("Sistema de análisis de ventas con visualizaciones interactivas", size="4", color="gray"),
+                    rx.heading("📈 Dashboard Analytics - Versión Mejorada", size="8"),
+                    rx.text("Sistema de análisis de ventas con visualizaciones interactivas Recharts + Plotly", size="4", color="gray"),
                     spacing="1",
                     align="start",
                 ),
@@ -839,8 +1292,11 @@ def index() -> rx.Component:
             # Top performers
             top_performers(),
             
-            # Gráficos
-            charts_section(),
+            # NUEVA SECCIÓN: Gráficos Plotly Dinámicos
+            plotly_charts_section(),
+            
+            # Gráficos Recharts Originales
+            charts_section_recharts(),
             
             # Estadísticas
             stats_grid("📊 Análisis Estadístico Descriptivo", DashboardState.statistics_data),

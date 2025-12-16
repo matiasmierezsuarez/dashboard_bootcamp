@@ -1,5 +1,6 @@
 """
 Módulo de acceso a datos y análisis estadístico
+VERSIÓN MEJORADA: Incluye queries para gráficos dinámicos con Plotly
 """
 
 import pandas as pd
@@ -8,9 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from .config import DATABASE_URL, DB_CONFIG
 
-# ⚠️ IMPORTANTE: Cambia 'gold' por el schema correcto de tu base de datos
-# Ejecuta check_schema.py para ver los schemas disponibles
-SCHEMA = "gold"  # Cambia esto según tu configuración
+SCHEMA = "gold"
 
 
 class DatabaseManager:
@@ -28,7 +27,7 @@ class DatabaseManager:
         with self.engine.connect() as conn:
             return pd.read_sql(text(query), conn, params=params)
     
-    # ==================== QUERIES PRINCIPALES ====================
+    # ==================== QUERIES ORIGINALES (sin cambios) ====================
     
     def get_top_states_by_sales(self, start_date: str = None, end_date: str = None, limit: int = 10) -> pd.DataFrame:
         """Estados con más ventas"""
@@ -201,16 +200,13 @@ class DatabaseManager:
     
     def get_statistics(
         self,
-        metric: str = "total",  # total, price, freight_value
-        group_by: str = None,  # customer_state, seller_state, product_category_name, etc.
+        metric: str = "total",
+        group_by: str = None,
         filter_value: str = None,
         start_date: str = None,
         end_date: str = None
     ) -> Dict:
-        """
-        Calcula estadísticas descriptivas para una métrica específica
-        """
-        # Construir query base
+        """Calcula estadísticas descriptivas para una métrica específica"""
         query = f"""
         SELECT f.{metric} as valor
         FROM {SCHEMA}.fact_sales f
@@ -221,7 +217,6 @@ class DatabaseManager:
         WHERE 1=1
         """
         
-        # Agregar filtros
         if start_date:
             query += f" AND cal.date_ymd >= '{start_date}'"
         if end_date:
@@ -239,7 +234,6 @@ class DatabaseManager:
             elif group_by == "product_category_name":
                 query += f" AND p.product_category_name = '{filter_value}'"
         
-        # Ejecutar query
         df = self.execute_query(query)
         
         if df.empty or df['valor'].isna().all():
@@ -259,7 +253,6 @@ class DatabaseManager:
         
         values = df['valor'].dropna()
         
-        # Calcular estadísticas
         try:
             mode_result = values.mode()
             moda = mode_result.iloc[0] if len(mode_result) > 0 else values.mean()
@@ -306,7 +299,7 @@ class DatabaseManager:
         return df['product_category_name'].tolist()
     
     def get_date_range(self) -> Tuple[str, str]:
-        """Obtiene el rango de fechas disponible en la base de datos"""
+        """Obtiene el rango de fechas disponible"""
         query = f"""
         SELECT 
             MIN(cal.date_ymd) as min_date,
@@ -338,6 +331,196 @@ class DatabaseManager:
         
         df = self.execute_query(query)
         return df.iloc[0].to_dict()
+    
+    # ==================== NUEVAS QUERIES PARA GRÁFICOS DINÁMICOS ====================
+    
+    def get_sales_by_state_dynamic(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        metric: str = "total_sales",
+        limit: int = 10
+    ) -> List[Dict]:
+        """
+        Query dinámica para ventas por estado con métrica seleccionable
+        Retorna lista de diccionarios para uso directo con Plotly
+        """
+        # Mapeo de métricas
+        metric_mapping = {
+            "total_sales": "SUM(f.total)",
+            "avg_sales": "AVG(f.total)",
+            "total_orders": "COUNT(DISTINCT f.order_id)",
+            "avg_ticket": "AVG(f.total)"
+        }
+        
+        metric_sql = metric_mapping.get(metric, metric_mapping["total_sales"])
+        
+        query = f"""
+        SELECT 
+            c.customer_state as state,
+            {metric_sql} as total_sales,
+            AVG(f.total) as avg_sales,
+            COUNT(DISTINCT f.order_id) as total_orders,
+            AVG(f.total) as avg_ticket
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        WHERE 1=1
+        """
+        
+        if start_date:
+            query += f" AND cal.date_ymd >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.date_ymd <= '{end_date}'"
+        
+        query += f"""
+        GROUP BY c.customer_state
+        ORDER BY {metric_sql} DESC
+        LIMIT :limit
+        """
+        
+        df = self.execute_query(query, {"limit": limit})
+        return df.to_dict('records')
+    
+    def get_sales_by_city_dynamic(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        metric: str = "total_sales",
+        limit: int = 10,
+        state: str = None
+    ) -> List[Dict]:
+        """Query dinámica para ventas por ciudad"""
+        metric_mapping = {
+            "total_sales": "SUM(f.total)",
+            "avg_sales": "AVG(f.total)",
+            "total_orders": "COUNT(DISTINCT f.order_id)",
+            "avg_ticket": "AVG(f.total)"
+        }
+        
+        metric_sql = metric_mapping.get(metric, metric_mapping["total_sales"])
+        
+        query = f"""
+        SELECT 
+            c.customer_city as city,
+            c.customer_state as state,
+            {metric_sql} as total_sales,
+            AVG(f.total) as avg_sales,
+            COUNT(DISTINCT f.order_id) as total_orders,
+            AVG(f.total) as avg_ticket
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        WHERE 1=1
+        """
+        
+        if start_date:
+            query += f" AND cal.date_ymd >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.date_ymd <= '{end_date}'"
+        if state:
+            query += f" AND c.customer_state = '{state}'"
+        
+        query += f"""
+        GROUP BY c.customer_city, c.customer_state
+        ORDER BY {metric_sql} DESC
+        LIMIT :limit
+        """
+        
+        df = self.execute_query(query, {"limit": limit})
+        return df.to_dict('records')
+    
+    def get_sales_by_category_dynamic(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        metric: str = "total_sales",
+        limit: int = 10
+    ) -> List[Dict]:
+        """Query dinámica para ventas por categoría"""
+        metric_mapping = {
+            "total_sales": "SUM(f.total)",
+            "avg_sales": "AVG(f.total)",
+            "total_orders": "COUNT(DISTINCT f.order_id)",
+            "avg_ticket": "AVG(f.total)"
+        }
+        
+        metric_sql = metric_mapping.get(metric, metric_mapping["total_sales"])
+        
+        query = f"""
+        SELECT 
+            p.product_category_name as category,
+            {metric_sql} as total_sales,
+            AVG(f.total) as avg_sales,
+            COUNT(DISTINCT f.order_id) as total_orders,
+            AVG(f.total) as avg_ticket,
+            COUNT(DISTINCT p.product_id) as total_products
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        WHERE p.product_category_name IS NOT NULL
+        """
+        
+        if start_date:
+            query += f" AND cal.date_ymd >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.date_ymd <= '{end_date}'"
+        
+        query += f"""
+        GROUP BY p.product_category_name
+        ORDER BY {metric_sql} DESC
+        LIMIT :limit
+        """
+        
+        df = self.execute_query(query, {"limit": limit})
+        return df.to_dict('records')
+    
+    def get_sales_by_seller_dynamic(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        metric: str = "total_sales",
+        limit: int = 10
+    ) -> List[Dict]:
+        """Query dinámica para ventas por vendedor"""
+        metric_mapping = {
+            "total_sales": "SUM(f.total)",
+            "avg_sales": "AVG(f.total)",
+            "total_orders": "COUNT(DISTINCT f.order_id)",
+            "avg_ticket": "AVG(f.total)"
+        }
+        
+        metric_sql = metric_mapping.get(metric, metric_mapping["total_sales"])
+        
+        query = f"""
+        SELECT 
+            s.seller_id,
+            s.seller_state as state,
+            s.seller_city as city,
+            {metric_sql} as total_sales,
+            AVG(f.total) as avg_sales,
+            COUNT(DISTINCT f.order_id) as total_orders,
+            AVG(f.total) as avg_ticket,
+            COUNT(DISTINCT f.customer_key) as unique_customers
+        FROM {SCHEMA}.fact_sales f
+        JOIN {SCHEMA}.dim_sellers s ON f.seller_key = s.seller_key
+        JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        WHERE 1=1
+        """
+        
+        if start_date:
+            query += f" AND cal.date_ymd >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.date_ymd <= '{end_date}'"
+        
+        query += f"""
+        GROUP BY s.seller_id, s.seller_state, s.seller_city
+        ORDER BY {metric_sql} DESC
+        LIMIT :limit
+        """
+        
+        df = self.execute_query(query, {"limit": limit})
+        return df.to_dict('records')
 
 
 # Instancia global
