@@ -39,19 +39,6 @@ Crea los siguientes archivos en tu directorio del proyecto:
 - `database.py` - Manager de base de datos y queries
 - `dashboard.py` - Aplicación principal (renombra o reemplaza tu archivo existente)
 
-### 3. Inicializar Reflex (si aún no lo hiciste)
-
-```bash
-reflex init
-```
-
-### 4. Ejecutar la aplicación
-
-```bash
-reflex run
-```
-
-La aplicación estará disponible en: `http://localhost:3000`
 
 ## 📊 Uso del Dashboard
 
@@ -128,19 +115,6 @@ db.get_top_states_by_sales(start_date, end_date, limit=20)  # Cambiar a 20 resul
 - Asegúrate de que tu IP esté permitida en Neon
 - Verifica que `psycopg2-binary` esté instalado correctamente
 
-### Error "Module not found"
-
-```bash
-pip install --upgrade -r requirements.txt
-```
-
-### La aplicación no se actualiza
-
-```bash
-# Limpiar cache y reiniciar
-rm -rf .web
-reflex run
-```
 
 ## 📝 Notas Importantes
 
@@ -157,13 +131,3 @@ reflex run
 - [ ] Comparación de períodos
 - [ ] Alertas y notificaciones
 - [ ] Dashboard de vendedor individual
-
-## 📞 Soporte
-
-Si encuentras algún problema o tienes sugerencias, no dudes en reportarlo.
-
----
-
-**Versión**: 1.0.0  
-**Reflex**: 0.8.22  
-**Python**: 3.9+
