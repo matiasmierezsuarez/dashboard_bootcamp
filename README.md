@@ -15,155 +15,113 @@ Dashboard interactivo de análisis de ventas construido con Reflex y PostgreSQL 
 ## 📁 Estructura del Proyecto
 
 ```
-tu_proyecto/
-├── config.py           # Configuración de conexión a DB
-├── database.py         # Queries y funciones de análisis
-├── dashboard.py        # Aplicación principal Reflex
-├── requirements.txt    # Dependencias
-└── README.md          # Este archivo
+proyecto_final/
+├── __init__.py
+├── database.py          
+├── state.py            
+├── events.py           
+├── components.py       
+├── pages.py            
+└── dashboard.py        
 ```
+📝 Guía de Modificación
+Para agregar una nueva página:
 
-## 🛠️ Instalación
+En pages.py - Agregar la función de la página:
 
-### 1. Instalar dependencias
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Estructura de archivos
-
-Crea los siguientes archivos en tu directorio del proyecto:
-
-- `config.py` - Configuración de la base de datos
-- `database.py` - Manager de base de datos y queries
-- `dashboard.py` - Aplicación principal (renombra o reemplaza tu archivo existente)
-
-### 3. Inicializar Reflex (si aún no lo hiciste)
-
-```bash
-reflex init
-```
-
-### 4. Ejecutar la aplicación
-
-```bash
-reflex run
-```
-
-La aplicación estará disponible en: `http://localhost:3000`
-
-## 📊 Uso del Dashboard
-
-### Filtros de Fecha
-
-1. Selecciona una fecha de inicio y fin
-2. Haz clic en "Aplicar" para actualizar todas las métricas
-
-### Análisis Estadístico
-
-1. **Métrica**: Elige entre `total` (precio + flete), `price` (solo precio), o `freight_value` (solo flete)
-2. **Agrupar por**: Selecciona cómo filtrar los datos:
-   - `customer_state`: Por estado del cliente
-   - `seller_state`: Por estado del vendedor
-   - `customer_city`: Por ciudad del cliente
-   - `product_category_name`: Por categoría de producto
-3. **Valor del filtro**: Selecciona un valor específico (ej: un estado o categoría)
-
-Las estadísticas se recalcularán automáticamente mostrando:
-- Media, Mediana, Moda
-- Desviación Estándar
-- Cuartiles (Q1, Q2, Q3) e IQR
-- Valores mínimo y máximo
-- Total de observaciones
-
-## 🔧 Configuración de la Base de Datos
-
-La conexión a Neon PostgreSQL está configurada en `config.py`. La URL de conexión incluye:
-
-- **Pool size**: 5 conexiones
-- **Max overflow**: 10 conexiones adicionales
-- **Pool timeout**: 30 segundos
-- **Pool recycle**: 3600 segundos (1 hora)
-
-## 📈 Vistas Disponibles
-
-El dashboard utiliza las siguientes vistas de la capa oro:
-
-- `dim_calendar` - Dimensión de fechas
-- `dim_customers` - Dimensión de clientes
-- `dim_products` - Dimensión de productos
-- `dim_sellers` - Dimensión de vendedores
-- `dim_status` - Dimensión de estados de órdenes
-- `fact_sales` - Tabla de hechos de ventas
-
-## 🎨 Personalización
-
-### Cambiar el tema
-
-En `dashboard.py`, modifica la configuración del tema:
-
-```python
-app = rx.App(
-    theme=rx.theme(
-        appearance="dark",  # "light" o "dark"
-        accent_color="blue",  # Cualquier color válido
+pythondef nueva_pagina(state_class) -> rx.Component:
+    return rx.vstack(
+        rx.heading("Mi Nueva Página"),
+        # ... tu contenido
     )
-)
-```
 
-### Ajustar límites de resultados
+En components.py - Agregar botón en navbar:
 
-En `database.py`, las funciones aceptan un parámetro `limit`:
+pythonnav_button("🆕 Nueva", "nueva", state_class),
 
-```python
-db.get_top_states_by_sales(start_date, end_date, limit=20)  # Cambiar a 20 resultados
-```
+En dashboard.py - Importar y agregar condición:
 
-## 🐛 Solución de Problemas
+pythonfrom .pages import ..., nueva_pagina
 
-### Error de conexión a la base de datos
+# En index():
+rx.cond(
+    DashboardState.current_page == "nueva",
+    nueva_pagina(DashboardState),
+),
+Para agregar nuevos eventos:
 
-- Verifica que la URL en `config.py` sea correcta
-- Asegúrate de que tu IP esté permitida en Neon
-- Verifica que `psycopg2-binary` esté instalado correctamente
+En events.py - Agregar método estático:
 
-### Error "Module not found"
+pythonclass MiNuevaClase:
+    @staticmethod
+    def mi_evento(state, param):
+        # lógica del evento
+        pass
 
-```bash
-pip install --upgrade -r requirements.txt
-```
+En dashboard.py - Vincular al estado:
 
-### La aplicación no se actualiza
+pythonDashboardState.mi_evento = rx.event(MiNuevaClase.mi_evento)
+Para agregar componentes reutilizables:
+En components.py:
+pythondef mi_componente(titulo: str, datos: dict) -> rx.Component:
+    return rx.card(
+        # ... tu componente
+    )
+Luego úsalo en cualquier página importándolo:
+pythonfrom .components import mi_componente
+🔍 Arquitectura del Sistema
+┌─────────────────────────────────────────┐
+│           dashboard.py                  │
+│     (Punto de entrada principal)        │
+│  - Configura la app                     │
+│  - Vincula eventos al estado            │
+│  - Define la página index()             │
+└────────────┬────────────────────────────┘
+             │
+    ┌────────┴────────┐
+    │                 │
+    ▼                 ▼
+┌─────────┐      ┌──────────┐
+│ state.py│◄─────┤events.py │
+│ (Estado)│      │ (Lógica) │
+└────┬────┘      └──────────┘
+     │
+     ▼
+┌──────────────┐      ┌──────────┐
+│components.py │◄─────┤pages.py  │
+│ (UI Base)    │      │(Páginas) │
+└──────────────┘      └──────────┘
+⚠️ Notas Importantes
 
-```bash
-# Limpiar cache y reiniciar
-rm -rf .web
-reflex run
-```
+No modifiques database.py - mantiene la misma funcionalidad
+El archivo principal ahora solo orquesta, no implementa lógica
+Los eventos se vinculan dinámicamente al estado en dashboard.py
+Las páginas reciben state_class como parámetro para acceder al estado
 
-## 📝 Notas Importantes
+🧪 Testing
+Para verificar que todo funciona:
 
-- Los datos se calculan en **tiempo real** desde la base de datos
-- Las estadísticas se recalculan con cada cambio de filtro
-- El dashboard está optimizado para grandes volúmenes de datos
-- Todas las queries utilizan índices para mejor rendimiento
+Ejecuta la aplicación:
 
-## 🔄 Próximas Mejoras
+bashreflex run
 
-- [ ] Exportar datos a CSV/Excel
-- [ ] Gráficos interactivos con Plotly
-- [ ] Filtros adicionales (por vendedor específico)
-- [ ] Comparación de períodos
-- [ ] Alertas y notificaciones
-- [ ] Dashboard de vendedor individual
+Verifica que cada página se carga correctamente
+Prueba los filtros globales
+Verifica los gráficos interactivos
+Comprueba el análisis temporal
 
-## 📞 Soporte
+🐛 Solución de Problemas Comunes
+Error: "module has no attribute..."
 
-Si encuentras algún problema o tienes sugerencias, no dudes en reportarlo.
+Verifica que los imports estén correctos en dashboard.py
+Asegúrate de haber creado todos los archivos
 
----
+Error: "State method not found"
 
-**Versión**: 1.0.0  
-**Reflex**: 0.8.22  
-**Python**: 3.9+
+Verifica que el evento esté vinculado en dashboard.py
+Revisa que el decorador @rx.event esté presente donde corresponda
+
+Los gráficos no se cargan
+
+Verifica que database.py no haya sido modificado
+Comprueba que las importaciones de pandas y plotly estén presentes
