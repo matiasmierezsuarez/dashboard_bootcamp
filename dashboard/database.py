@@ -1,6 +1,7 @@
 """
 Módulo de acceso a datos y análisis estadístico
 VERSIÓN MEJORADA: Soporte completo para filtros globales (estado, categoría, fechas)
+INCLUYE: Métodos de análisis temporal
 """
 
 import pandas as pd
@@ -500,6 +501,131 @@ class DatabaseManager:
         """
         
         df = self.execute_query(query, {"limit": limit})
+        return df.to_dict('records') if not df.empty else []
+    
+    # ==================== ANÁLISIS TEMPORAL ====================
+    
+    def get_sales_by_year(
+        self,
+        metric: str = "avg_sales",
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> List[Dict]:
+        """Obtiene ventas agrupadas por año - CON FILTROS GLOBALES"""
+        allowed_metrics = {"avg_sales", "sum_sales", "std_sales"}
+        if metric not in allowed_metrics:
+            metric = "avg_sales"
+        
+        query = f"""
+        SELECT 
+            cal.date_year,
+            ROUND(AVG(f.total), 2) AS avg_sales,
+            ROUND(SUM(f.total), 2) AS sum_sales,
+            ROUND(STDDEV(f.total), 2) AS std_sales
+        FROM {SCHEMA}.fact_sales f
+        INNER JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        INNER JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        INNER JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        WHERE 1=1
+        """
+        
+        if state_filter:
+            query += f" AND c.customer_state = '{state_filter}'"
+        if category_filter:
+            query += f" AND p.product_category_name = '{category_filter}'"
+        
+        query += f"""
+        GROUP BY cal.date_year
+        ORDER BY cal.date_year, {metric} DESC
+        """
+        
+        df = self.execute_query(query)
+        return df.to_dict('records') if not df.empty else []
+    
+    def get_sales_by_year_month(
+        self,
+        metric: str = "avg_sales",
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> List[Dict]:
+        """Obtiene ventas agrupadas por año-mes - CON FILTROS GLOBALES"""
+        allowed_metrics = {"avg_sales", "sum_sales", "std_sales"}
+        if metric not in allowed_metrics:
+            metric = "avg_sales"
+        
+        query = f"""
+        SELECT 
+            cal.yyyymm,
+            ROUND(AVG(f.total), 2) AS avg_sales,
+            ROUND(SUM(f.total), 2) AS sum_sales,
+            ROUND(STDDEV(f.total), 2) AS std_sales
+        FROM {SCHEMA}.fact_sales f
+        INNER JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        INNER JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        INNER JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        WHERE 1=1
+        """
+        
+        if start_date:
+            query += f" AND cal.iso_date::DATE >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.iso_date::DATE <= '{end_date}'"
+        if state_filter:
+            query += f" AND c.customer_state = '{state_filter}'"
+        if category_filter:
+            query += f" AND p.product_category_name = '{category_filter}'"
+        
+        query += f"""
+        GROUP BY cal.yyyymm
+        ORDER BY cal.yyyymm, {metric} DESC
+        """
+        
+        df = self.execute_query(query)
+        return df.to_dict('records') if not df.empty else []
+    
+    def get_sales_by_year_month_day(
+        self,
+        metric: str = "avg_sales",
+        start_date: str = None,
+        end_date: str = None,
+        state_filter: str = None,
+        category_filter: str = None
+    ) -> List[Dict]:
+        """Obtiene ventas agrupadas por año-mes-día - CON FILTROS GLOBALES"""
+        allowed_metrics = {"avg_sales", "sum_sales", "std_sales"}
+        if metric not in allowed_metrics:
+            metric = "avg_sales"
+        
+        query = f"""
+        SELECT 
+            cal.yyyymmdd,
+            ROUND(AVG(f.total), 2) AS avg_sales,
+            ROUND(SUM(f.total), 2) AS sum_sales,
+            ROUND(STDDEV(f.total), 2) AS std_sales
+        FROM {SCHEMA}.fact_sales f
+        INNER JOIN {SCHEMA}.dim_calendar cal ON f.date_purchase_key = cal.date_key
+        INNER JOIN {SCHEMA}.dim_customers c ON f.customer_key = c.customer_key
+        INNER JOIN {SCHEMA}.dim_products p ON f.product_key = p.product_key
+        WHERE 1=1
+        """
+        
+        if start_date:
+            query += f" AND cal.iso_date::DATE >= '{start_date}'"
+        if end_date:
+            query += f" AND cal.iso_date::DATE <= '{end_date}'"
+        if state_filter:
+            query += f" AND c.customer_state = '{state_filter}'"
+        if category_filter:
+            query += f" AND p.product_category_name = '{category_filter}'"
+        
+        query += f"""
+        GROUP BY cal.yyyymmdd
+        ORDER BY cal.yyyymmdd, {metric} DESC
+        """
+        
+        df = self.execute_query(query)
         return df.to_dict('records') if not df.empty else []
     
     # ==================== FILTROS Y UTILIDADES ====================
