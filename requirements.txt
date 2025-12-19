@@ -1,9 +1,7 @@
-<<<<<<< HEAD
 reflex>=0.7.13a1
-=======
 psycopg2-binary==2.9.9
 reflex>=0.8.21
 pandas>=2.0.0
 sqlalchemy==2.0.23
 numpy==1.24.0
->>>>>>> 83c717dee2a017a42a92b8aaa8df21bbab98a084
+
