@@ -9,7 +9,17 @@
 - ⚡ Consultas optimizadas con rendimiento <2 segundos
 - 🎨 UI/UX personalizada sin dependencias de herramientas BI tradicionales
 
-- 
+## 📊 Fuente de Datos
+
+Los datos utilizados en este dashboard provienen de un **Data Warehouse** construido específicamente para este proyecto.
+
+Si deseas conocer el **proceso completo de ETL**, incluyendo:
+- Extracción y carga inicial de datos (Capa Bronze)
+- Limpieza, validación y estandarización (Capa Silver)  
+- Modelado dimensional y creación de métricas (Capa Gold)
+
+Visita el repositorio del Data Warehouse: [DataAnalytics_Devligth](https://github.com/eme-19-87/DataAnalytics_Devligth)
+
 ## 🏛️ Arquitectura de Datos (Medallion Architecture)
 
 
@@ -19,9 +29,6 @@ Para garantizar la integridad y calidad de la información, construimos una base
 1.  **Bronze Layer:** Ingesta de los datos crudos tal cual vienen de la fuente.
 2.  **Silver Layer:** Procesos de limpieza, normalización y manejo de nulos.
 3.  **Gold Layer:** Modelado dimensional (Fact y Dimensions) listo para ser consumido por herramientas de BI o Dashboards.
-
-
-## 📊 Visualización (Dashboard con Reflex)
 
 
 En lugar de usar herramientas tradicionales de BI, optamos por desarrollar una aplicación web interactiva utilizando **Python** y el framework **Reflex** lo que nos permitio una personalizacion total del Dashboard
